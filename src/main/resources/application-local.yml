@@ -18,3 +18,15 @@ spring:
 
   server:
     port: 8080
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
+
+jwt:
+  secret: "NPSPm3Q7niAGJSryLpGq0j8bw21KehKKm7WgD+k1+BceNbt0noYIJR8DY8A1C7CR
+gjMXpe3bu3OD02XcKiz25A=="
+  access-token-expiration-ms: 900000
+  refresh-token-expiration-ms: 604800000
