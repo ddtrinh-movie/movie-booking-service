@@ -16,10 +16,10 @@ import com.ddtrinh.movie_booking.showtime.repository.ShowtimeRepository;
 import com.ddtrinh.movie_booking.showtime.repository.ShowtimeSeatRepository;
 import com.ddtrinh.movie_booking.user.entiy.User;
 import com.ddtrinh.movie_booking.user.repository.UserRepository;
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Duration;

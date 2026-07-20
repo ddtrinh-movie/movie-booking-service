@@ -5,9 +5,9 @@ import com.ddtrinh.movie_booking.cinema.dto.CinemaResponse;
 import com.ddtrinh.movie_booking.cinema.entity.Cinema;
 import com.ddtrinh.movie_booking.cinema.repository.CinemaRepository;
 import com.ddtrinh.movie_booking.common.exception.ResourceNotFoundException;
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;

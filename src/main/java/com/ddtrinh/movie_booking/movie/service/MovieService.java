@@ -11,8 +11,10 @@ import com.ddtrinh.movie_booking.movie.entiy.Movie;
 import com.ddtrinh.movie_booking.movie.entiy.MovieStatus;
 import com.ddtrinh.movie_booking.movie.repository.MovieRepository;
 import com.ddtrinh.movie_booking.movie.repository.MovieSpecification;
-import jakarta.transaction.Transactional;
+import org.springframework.transaction.annotation.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -37,6 +39,7 @@ public class MovieService {
         return new PageResponse<>(page);
     }
 
+    @Cacheable(cacheNames = "movies", key = "#id")
     public MovieResponse getById(UUID id) {
         return new MovieResponse(findMovieOrThrow(id));
     }
@@ -50,6 +53,7 @@ public class MovieService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = "movies", key = "#id")
     public MovieResponse update(UUID id, MovieRequest request) {
         Movie movie = findMovieOrThrow(id);
         applyRequest(movie, request);
@@ -58,6 +62,7 @@ public class MovieService {
     }
 
     @Transactional
+    @CacheEvict(cacheNames = "movies", key = "#id")
     public void cancel(UUID id) {
         Movie movie = findMovieOrThrow(id);
         if (movie.isDeleted()) {
