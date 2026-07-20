@@ -18,6 +18,7 @@ import com.ddtrinh.movie_booking.user.entiy.User;
 import com.ddtrinh.movie_booking.user.repository.UserRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -40,27 +41,78 @@ public class BookingService {
 
     @Transactional
     public BookingResponse create(UUID userId, BookingRequest request) {
-        User user = userRepository.findById(userId)
+        User user = findUserOrThrow(userId);
+        Showtime showtime = findBookableShowtimeOrThrow(request.getShowtimeId());
+
+        List<ShowtimeSeat> showtimeSeats = showtimeSeatRepository
+                .findAllByShowtimeIdAndIdInForUpdate(request.getShowtimeId(), request.getSeatIds());
+        if (showtimeSeats.size() != request.getSeatIds().size()) {
+            throw new ResourceNotFoundException("One or more seats do not belong to this showtime");
+        }
+        validateAllAvailable(showtimeSeats);
+
+        Booking booking = createPendingBooking(user, showtime, showtimeSeats.size());
+
+        for (ShowtimeSeat showtimeSeat : showtimeSeats) {
+            showtimeSeat.setStatus(ShowtimeSeatStatus.BOOKED);
+            showtimeSeatRepository.save(showtimeSeat);
+            saveBookingSeat(booking, showtimeSeat, showtime.getPrice());
+        }
+
+        return buildResponse(booking);
+    }
+
+    @Transactional
+    public BookingResponse createWithOptimisticLock(UUID userId, BookingRequest request) {
+        User user = findUserOrThrow(userId);
+        Showtime showtime = findBookableShowtimeOrThrow(request.getShowtimeId());
+
+        List<ShowtimeSeat> showtimeSeats = showtimeSeatRepository
+                .findAllByShowtimeIdAndIdIn(request.getShowtimeId(), request.getSeatIds());
+        if (showtimeSeats.size() != request.getSeatIds().size()) {
+            throw new ResourceNotFoundException("One or more seats do not belong to this showtime");
+        }
+        validateAllAvailable(showtimeSeats);
+
+        Booking booking = createPendingBooking(user, showtime, showtimeSeats.size());
+
+        try {
+            for (ShowtimeSeat showtimeSeat : showtimeSeats) {
+                showtimeSeat.setStatus(ShowtimeSeatStatus.BOOKED);
+                showtimeSeatRepository.saveAndFlush(showtimeSeat);
+                saveBookingSeat(booking, showtimeSeat, showtime.getPrice());
+            }
+        } catch (ObjectOptimisticLockingFailureException e) {
+            throw new ConflictException("One or more seats were just booked by someone else, please retry");
+        }
+        return buildResponse(booking);
+    }
+
+    public BookingResponse getById(UUID id) {
+        Booking booking = bookingRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + id));
+        List<BookingSeat> bookingSeats = bookingSeatRepository.findAllByBookingId(id);
+        return new BookingResponse(booking, bookingSeats);
+    }
+
+    private User findUserOrThrow(UUID userId) {
+        return userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
+    }
 
-        Showtime showtime = showtimeRepository.findById(request.getShowtimeId())
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Showtime not found with id: " + request.getShowtimeId()));
-
+    private Showtime findBookableShowtimeOrThrow(UUID showtimeId) {
+        Showtime showtime = showtimeRepository.findById(showtimeId)
+                .orElseThrow(() -> new ResourceNotFoundException("Showtime not found with id: " + showtimeId));
         if (showtime.isDeleted()) {
             throw new ConflictException("This showtime has been cancelled");
         }
         if (showtime.getStartTime().isBefore(Instant.now())) {
             throw new ConflictException("This showtime has already started");
         }
+        return showtime;
+    }
 
-        List<ShowtimeSeat> showtimeSeats = showtimeSeatRepository
-                .findAllByShowtimeIdAndIdInForUpdate(request.getShowtimeId(), request.getSeatIds());
-
-        if (showtimeSeats.size() != request.getSeatIds().size()) {
-            throw new ResourceNotFoundException("One or more seats do not belong to this showtime");
-        }
-
+    private void validateAllAvailable(List<ShowtimeSeat> showtimeSeats) {
         for (ShowtimeSeat showtimeSeat : showtimeSeats) {
             if (showtimeSeat.getStatus() != ShowtimeSeatStatus.AVAILABLE) {
                 throw new ConflictException(
@@ -68,8 +120,10 @@ public class BookingService {
                                 + " is no longer available");
             }
         }
+    }
 
-        BigDecimal total = showtime.getPrice().multiply(BigDecimal.valueOf(showtimeSeats.size()));
+    private Booking createPendingBooking(User user, Showtime showtime, int seatCount) {
+        BigDecimal total = showtime.getPrice().multiply(BigDecimal.valueOf(seatCount));
 
         Booking booking = new Booking();
         booking.setUser(user);
@@ -78,26 +132,19 @@ public class BookingService {
         booking.setExpiresAt(Instant.now().plus(HOLD_DURATION));
         booking.setTotalAmount(total);
         bookingRepository.save(booking);
-
-        for (ShowtimeSeat showtimeSeat : showtimeSeats) {
-            showtimeSeat.setStatus(ShowtimeSeatStatus.BOOKED);
-            showtimeSeatRepository.save(showtimeSeat);
-
-            BookingSeat bookingSeat = new BookingSeat();
-            bookingSeat.setBooking(booking);
-            bookingSeat.setShowtimeSeat(showtimeSeat);
-            bookingSeat.setPrice(showtime.getPrice());
-            bookingSeatRepository.save(bookingSeat);
-        }
-
-        List<BookingSeat> savedBookingSeats = bookingSeatRepository.findAllByBookingId(booking.getId());
-        return new BookingResponse(booking, savedBookingSeats);
+        return booking;
     }
 
-    public BookingResponse getById(UUID id) {
-        Booking booking = bookingRepository.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + id));
-        List<BookingSeat> bookingSeats = bookingSeatRepository.findAllByBookingId(id);
-        return new BookingResponse(booking, bookingSeats);
+    private void saveBookingSeat(Booking booking, ShowtimeSeat showtimeSeat, BigDecimal price) {
+        BookingSeat bookingSeat = new BookingSeat();
+        bookingSeat.setBooking(booking);
+        bookingSeat.setShowtimeSeat(showtimeSeat);
+        bookingSeat.setPrice(price);
+        bookingSeatRepository.save(bookingSeat);
+    }
+
+    private BookingResponse buildResponse(Booking booking) {
+        List<BookingSeat> savedBookingSeats = bookingSeatRepository.findAllByBookingId(booking.getId());
+        return new BookingResponse(booking, savedBookingSeats);
     }
 }
