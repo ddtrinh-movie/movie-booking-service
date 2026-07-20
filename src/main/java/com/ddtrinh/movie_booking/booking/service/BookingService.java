@@ -95,6 +95,25 @@ public class BookingService {
         return new BookingResponse(booking, bookingSeats);
     }
 
+    @Transactional
+    public int expirePendingBookings() {
+        List<Booking> expiredBookings = bookingRepository
+                .findAllByStatusAndExpiresAtBefore(BookingStatus.PENDING, Instant.now());
+
+        for (Booking booking : expiredBookings) {
+            booking.setStatus(BookingStatus.EXPIRED);
+            bookingRepository.save(booking);
+
+            List<BookingSeat> bookingSeats = bookingSeatRepository.findAllByBookingId(booking.getId());
+            for (BookingSeat bookingSeat : bookingSeats) {
+                ShowtimeSeat showtimeSeat = bookingSeat.getShowtimeSeat();
+                showtimeSeat.setStatus(ShowtimeSeatStatus.AVAILABLE);
+                showtimeSeatRepository.save(showtimeSeat);
+            }
+        }
+        return expiredBookings.size();
+    }
+
     private User findUserOrThrow(UUID userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
