@@ -25,4 +25,8 @@ public class ShowtimeSeat extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ShowtimeSeatStatus status = ShowtimeSeatStatus.AVAILABLE;
+
+    @Version
+    @Column(nullable = false)
+    private Long version = 0L;
 }

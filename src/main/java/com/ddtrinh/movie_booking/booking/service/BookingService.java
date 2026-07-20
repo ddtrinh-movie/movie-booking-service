@@ -8,6 +8,7 @@ import com.ddtrinh.movie_booking.booking.entiy.BookingStatus;
 import com.ddtrinh.movie_booking.booking.repository.BookingRepository;
 import com.ddtrinh.movie_booking.booking.repository.BookingSeatRepository;
 import com.ddtrinh.movie_booking.common.exception.ConflictException;
+import com.ddtrinh.movie_booking.common.exception.ForbiddenException;
 import com.ddtrinh.movie_booking.common.exception.ResourceNotFoundException;
 import com.ddtrinh.movie_booking.showtime.entiy.Showtime;
 import com.ddtrinh.movie_booking.showtime.entiy.ShowtimeSeat;
@@ -96,22 +97,61 @@ public class BookingService {
     }
 
     @Transactional
+    public BookingResponse confirm(UUID userId, UUID bookingId) {
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + bookingId));
+
+        if (!booking.getUser().getId().equals(userId)) {
+            throw new ForbiddenException("This booking does not belong to you");
+        }
+
+        if (booking.getStatus() == BookingStatus.PENDING && booking.getExpiresAt().isBefore(Instant.now())) {
+            expireSingleBooking(booking);
+            throw new ConflictException("This booking's hold has expired, please book again");
+        }
+
+        if (booking.getStatus() != BookingStatus.PENDING) {
+            throw new ConflictException(
+                    "Booking is not in a confirmable state, current status: " + booking.getStatus());
+        }
+
+        try {
+            booking.setStatus(BookingStatus.CONFIRMED);
+            bookingRepository.saveAndFlush(booking);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            throw new ConflictException("This booking was just modified elsewhere, please refresh and try again");
+        }
+
+        return buildResponse(booking);
+    }
+
+    @Transactional
     public int expirePendingBookings() {
-        List<Booking> expiredBookings = bookingRepository
+        List<Booking> candidates = bookingRepository
                 .findAllByStatusAndExpiresAtBefore(BookingStatus.PENDING, Instant.now());
 
-        for (Booking booking : expiredBookings) {
-            booking.setStatus(BookingStatus.EXPIRED);
-            bookingRepository.save(booking);
+        int expiredCount = 0;
+        for (Booking booking : candidates) {
+            try {
+                expireSingleBooking(booking);
+                expiredCount++;
+            } catch (ObjectOptimisticLockingFailureException e) {
 
-            List<BookingSeat> bookingSeats = bookingSeatRepository.findAllByBookingId(booking.getId());
-            for (BookingSeat bookingSeat : bookingSeats) {
-                ShowtimeSeat showtimeSeat = bookingSeat.getShowtimeSeat();
-                showtimeSeat.setStatus(ShowtimeSeatStatus.AVAILABLE);
-                showtimeSeatRepository.save(showtimeSeat);
             }
         }
-        return expiredBookings.size();
+        return expiredCount;
+    }
+
+    private void expireSingleBooking(Booking booking) {
+        booking.setStatus(BookingStatus.EXPIRED);
+        bookingRepository.saveAndFlush(booking);
+
+        List<BookingSeat> bookingSeats = bookingSeatRepository.findAllByBookingId(booking.getId());
+        for (BookingSeat bookingSeat : bookingSeats) {
+            ShowtimeSeat showtimeSeat = bookingSeat.getShowtimeSeat();
+            showtimeSeat.setStatus(ShowtimeSeatStatus.AVAILABLE);
+            showtimeSeatRepository.save(showtimeSeat);
+        }
     }
 
     private User findUserOrThrow(UUID userId) {

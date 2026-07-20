@@ -31,4 +31,10 @@ public class BookingController {
     public ResponseEntity<ApiResponse<BookingResponse>> getById(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success(bookingService.getById(id)));
     }
+
+    @PostMapping("/{id}/confirm")
+    public ResponseEntity<ApiResponse<BookingResponse>> confirm(@AuthenticationPrincipal UUID userId,
+                                                                @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.success(bookingService.confirm(userId, id)));
+    }
 }

@@ -29,6 +29,11 @@ public class GlobalExceptionHandler {
         return build(ErrorCode.UNAUTHORIZED, ex.getMessage());
     }
 
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<ApiResponse<Void>> handleForbidden(ForbiddenException ex) {
+        return build(ErrorCode.FORBIDDEN, ex.getMessage());
+    }
+
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiResponse<Void>> handleConflict(ConflictException ex) {
         return build(ErrorCode.CONFLICT, ex.getMessage());

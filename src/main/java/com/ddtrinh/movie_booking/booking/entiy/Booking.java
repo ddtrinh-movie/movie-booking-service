@@ -35,4 +35,8 @@ public class Booking extends BaseEntity {
 
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
+
+    @Version
+    @Column(nullable = false)
+    private Long version = 0L;
 }
