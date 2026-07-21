@@ -5,6 +5,7 @@ import com.ddtrinh.movie_booking.booking.dto.BookingResponse;
 import com.ddtrinh.movie_booking.booking.entiy.Booking;
 import com.ddtrinh.movie_booking.booking.entiy.BookingSeat;
 import com.ddtrinh.movie_booking.booking.entiy.BookingStatus;
+import com.ddtrinh.movie_booking.booking.event.BookingConfirmedEvent;
 import com.ddtrinh.movie_booking.booking.repository.BookingRepository;
 import com.ddtrinh.movie_booking.booking.repository.BookingSeatRepository;
 import com.ddtrinh.movie_booking.common.exception.ConflictException;
@@ -18,6 +19,7 @@ import com.ddtrinh.movie_booking.showtime.repository.ShowtimeSeatRepository;
 import com.ddtrinh.movie_booking.user.entiy.User;
 import com.ddtrinh.movie_booking.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,6 +41,8 @@ public class BookingService {
     private final ShowtimeRepository showtimeRepository;
     private final ShowtimeSeatRepository showtimeSeatRepository;
     private final UserRepository userRepository;
+    private final ApplicationEventPublisher eventPublisher;
+    private final BookingExpiryWriter bookingExpiryWriter;
 
     @Transactional
     public BookingResponse create(UUID userId, BookingRequest request) {
@@ -106,7 +110,7 @@ public class BookingService {
         }
 
         if (booking.getStatus() == BookingStatus.PENDING && booking.getExpiresAt().isBefore(Instant.now())) {
-            expireSingleBooking(booking);
+            bookingExpiryWriter.expireAndPersist(booking);
             throw new ConflictException("This booking's hold has expired, please book again");
         }
 
@@ -122,6 +126,13 @@ public class BookingService {
             throw new ConflictException("This booking was just modified elsewhere, please refresh and try again");
         }
 
+        eventPublisher.publishEvent(new BookingConfirmedEvent(
+                booking.getId(),
+                booking.getUser().getEmail(),
+                booking.getShowtime().getMovie().getTitle(),
+                booking.getShowtime().getStartTime(),
+                booking.getTotalAmount()));
+
         return buildResponse(booking);
     }
 
@@ -133,25 +144,13 @@ public class BookingService {
         int expiredCount = 0;
         for (Booking booking : candidates) {
             try {
-                expireSingleBooking(booking);
+                bookingExpiryWriter.expireAndPersist(booking);
                 expiredCount++;
-            } catch (ObjectOptimisticLockingFailureException e) {
+            } catch (ObjectOptimisticLockingFailureException ignored) {
 
             }
         }
         return expiredCount;
-    }
-
-    private void expireSingleBooking(Booking booking) {
-        booking.setStatus(BookingStatus.EXPIRED);
-        bookingRepository.saveAndFlush(booking);
-
-        List<BookingSeat> bookingSeats = bookingSeatRepository.findAllByBookingId(booking.getId());
-        for (BookingSeat bookingSeat : bookingSeats) {
-            ShowtimeSeat showtimeSeat = bookingSeat.getShowtimeSeat();
-            showtimeSeat.setStatus(ShowtimeSeatStatus.AVAILABLE);
-            showtimeSeatRepository.save(showtimeSeat);
-        }
     }
 
     private User findUserOrThrow(UUID userId) {
