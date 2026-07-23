@@ -37,6 +37,7 @@ public class PaymentClient {
         try {
             PaymentServiceEnvelope<PaymentChargeResponse> envelope = paymentServiceRestClient.post()
                     .uri("/api/v1/payments")
+                    .header("Idempotency-Key", bookingId.toString())
                     .body(request)
                     .retrieve()
                     .body(CHARGE_RESPONSE_TYPE);
@@ -62,6 +63,7 @@ public class PaymentClient {
         try {
             PaymentServiceEnvelope<RefundChargeResponse> envelope = paymentServiceRestClient.post()
                     .uri("/api/v1/refunds")
+                    .header("Idempotency-Key", paymentId.toString())
                     .body(request)
                     .retrieve()
                     .body(REFUND_RESPONSE_TYPE);
