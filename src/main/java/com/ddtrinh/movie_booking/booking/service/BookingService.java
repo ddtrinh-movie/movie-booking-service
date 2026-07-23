@@ -10,7 +10,11 @@ import com.ddtrinh.movie_booking.booking.repository.BookingRepository;
 import com.ddtrinh.movie_booking.booking.repository.BookingSeatRepository;
 import com.ddtrinh.movie_booking.common.exception.ConflictException;
 import com.ddtrinh.movie_booking.common.exception.ForbiddenException;
+import com.ddtrinh.movie_booking.common.exception.PaymentDeclinedException;
 import com.ddtrinh.movie_booking.common.exception.ResourceNotFoundException;
+import com.ddtrinh.movie_booking.payment.client.PaymentClient;
+import com.ddtrinh.movie_booking.payment.dto.PaymentChargeResponse;
+import com.ddtrinh.movie_booking.payment.dto.PaymentStatus;
 import com.ddtrinh.movie_booking.showtime.entiy.Showtime;
 import com.ddtrinh.movie_booking.showtime.entiy.ShowtimeSeat;
 import com.ddtrinh.movie_booking.showtime.entiy.ShowtimeSeatStatus;
@@ -43,6 +47,7 @@ public class BookingService {
     private final UserRepository userRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final BookingExpiryWriter bookingExpiryWriter;
+    private final PaymentClient paymentClient;
 
     @Transactional
     public BookingResponse create(UUID userId, BookingRequest request) {
@@ -117,6 +122,11 @@ public class BookingService {
         if (booking.getStatus() != BookingStatus.PENDING) {
             throw new ConflictException(
                     "Booking is not in a confirmable state, current status: " + booking.getStatus());
+        }
+
+        PaymentChargeResponse payment = paymentClient.charge(booking.getId(), booking.getTotalAmount());
+        if (payment.getStatus() != PaymentStatus.SUCCEEDED) {
+            throw new PaymentDeclinedException("Payment was declined for booking " + booking.getId());
         }
 
         try {

@@ -12,6 +12,8 @@ public enum ErrorCode {
     FORBIDDEN(HttpStatus.FORBIDDEN, "Forbidden"),
     CONFLICT(HttpStatus.CONFLICT, "Conflict"),
     VALIDATION_ERROR(HttpStatus.BAD_REQUEST, "Validation failed"),
+    PAYMENT_DECLINED(HttpStatus.PAYMENT_REQUIRED, "Payment declined"),
+    PAYMENT_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "Payment service unavailable"),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "Internal server error");
 
     private final HttpStatus status;

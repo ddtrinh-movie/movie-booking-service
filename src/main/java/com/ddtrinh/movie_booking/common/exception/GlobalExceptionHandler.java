@@ -39,6 +39,16 @@ public class GlobalExceptionHandler {
         return build(ErrorCode.CONFLICT, ex.getMessage());
     }
 
+    @ExceptionHandler(PaymentDeclinedException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePaymentDeclined(PaymentDeclinedException ex) {
+        return build(ErrorCode.PAYMENT_DECLINED, ex.getMessage());
+    }
+
+    @ExceptionHandler(PaymentServiceUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePaymentServiceUnavailable(PaymentServiceUnavailableException ex) {
+        return build(ErrorCode.PAYMENT_SERVICE_UNAVAILABLE, ex.getMessage());
+    }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleValidation(MethodArgumentNotValidException ex) {
         String message = ex.getBindingResult().getFieldErrors().stream()
