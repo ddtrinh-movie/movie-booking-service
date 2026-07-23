@@ -10,6 +10,7 @@ import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.UUID;
 
 @Getter
 @Setter
@@ -32,6 +33,9 @@ public class Booking extends BaseEntity {
 
     @Column(name = "total_amount", nullable = false)
     private BigDecimal totalAmount;
+
+    @Column(name = "payment_id")
+    private UUID paymentId;
 
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;

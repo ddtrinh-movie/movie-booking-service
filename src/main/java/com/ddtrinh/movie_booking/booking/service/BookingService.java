@@ -5,6 +5,7 @@ import com.ddtrinh.movie_booking.booking.dto.BookingResponse;
 import com.ddtrinh.movie_booking.booking.entiy.Booking;
 import com.ddtrinh.movie_booking.booking.entiy.BookingSeat;
 import com.ddtrinh.movie_booking.booking.entiy.BookingStatus;
+import com.ddtrinh.movie_booking.booking.event.BookingCancelledEvent;
 import com.ddtrinh.movie_booking.booking.event.BookingConfirmedEvent;
 import com.ddtrinh.movie_booking.booking.repository.BookingRepository;
 import com.ddtrinh.movie_booking.booking.repository.BookingSeatRepository;
@@ -15,6 +16,7 @@ import com.ddtrinh.movie_booking.common.exception.ResourceNotFoundException;
 import com.ddtrinh.movie_booking.payment.client.PaymentClient;
 import com.ddtrinh.movie_booking.payment.dto.PaymentChargeResponse;
 import com.ddtrinh.movie_booking.payment.dto.PaymentStatus;
+import com.ddtrinh.movie_booking.payment.dto.RefundChargeResponse;
 import com.ddtrinh.movie_booking.showtime.entiy.Showtime;
 import com.ddtrinh.movie_booking.showtime.entiy.ShowtimeSeat;
 import com.ddtrinh.movie_booking.showtime.entiy.ShowtimeSeatStatus;
@@ -131,6 +133,7 @@ public class BookingService {
 
         try {
             booking.setStatus(BookingStatus.CONFIRMED);
+            booking.setPaymentId(payment.getPaymentId());
             bookingRepository.saveAndFlush(booking);
         } catch (ObjectOptimisticLockingFailureException e) {
             throw new ConflictException("This booking was just modified elsewhere, please refresh and try again");
@@ -142,6 +145,46 @@ public class BookingService {
                 booking.getShowtime().getMovie().getTitle(),
                 booking.getShowtime().getStartTime(),
                 booking.getTotalAmount()));
+
+        return buildResponse(booking);
+    }
+
+    @Transactional
+    public BookingResponse cancel(UUID userId, UUID bookingId) {
+        Booking booking = bookingRepository.findById(bookingId)
+                .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + bookingId));
+
+        if (!booking.getUser().getId().equals(userId)) {
+            throw new ForbiddenException("This booking does not belong to you");
+        }
+
+        if (booking.getStatus() != BookingStatus.CONFIRMED) {
+            throw new ConflictException(
+                    "Only a confirmed booking can be cancelled, current status: " + booking.getStatus());
+        }
+
+        try {
+            booking.setStatus(BookingStatus.CANCELLED);
+            bookingRepository.saveAndFlush(booking);
+        } catch (ObjectOptimisticLockingFailureException e) {
+            throw new ConflictException("This booking was just modified elsewhere, please refresh and try again");
+        }
+
+        RefundChargeResponse refund = paymentClient.refund(booking.getPaymentId());
+
+        List<BookingSeat> bookingSeats = bookingSeatRepository.findAllByBookingId(booking.getId());
+        for (BookingSeat bookingSeat : bookingSeats) {
+            ShowtimeSeat showtimeSeat = bookingSeat.getShowtimeSeat();
+            showtimeSeat.setStatus(ShowtimeSeatStatus.AVAILABLE);
+            showtimeSeatRepository.save(showtimeSeat);
+        }
+
+        eventPublisher.publishEvent(new BookingCancelledEvent(
+                booking.getId(),
+                booking.getUser().getEmail(),
+                booking.getShowtime().getMovie().getTitle(),
+                refund.getAmount(),
+                Instant.now()));
 
         return buildResponse(booking);
     }

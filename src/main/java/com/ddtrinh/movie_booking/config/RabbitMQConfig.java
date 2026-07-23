@@ -20,6 +20,9 @@ public class RabbitMQConfig {
     public static final String BOOKING_EXPIRED_ROUTING_KEY = "booking.expired";
     public static final String BOOKING_EXPIRED_NOTIFICATION_QUEUE = "notification.booking-expired";
 
+    public static final String BOOKING_CANCELLED_ROUTING_KEY = "booking.cancelled";
+    public static final String BOOKING_CANCELLED_NOTIFICATION_QUEUE = "notification.booking-cancelled";
+
     @Bean
     public TopicExchange bookingEventsExchange() {
         return new TopicExchange(BOOKING_EVENTS_EXCHANGE);
@@ -59,6 +62,18 @@ public class RabbitMQConfig {
         return BindingBuilder.bind(bookingExpiredNotificationQueue)
                 .to(bookingEventsExchange)
                 .with(BOOKING_EXPIRED_ROUTING_KEY);
+    }
+
+    @Bean
+    public Queue bookingCancelledNotificationQueue() {
+        return new Queue(BOOKING_CANCELLED_NOTIFICATION_QUEUE, true);
+    }
+
+    @Bean
+    public Binding bookingCancelledNotificationBinding(Queue bookingCancelledNotificationQueue, TopicExchange bookingEventsExchange) {
+        return BindingBuilder.bind(bookingCancelledNotificationQueue)
+                .to(bookingEventsExchange)
+                .with(BOOKING_CANCELLED_ROUTING_KEY);
     }
 
     @Bean
