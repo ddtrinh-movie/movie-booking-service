@@ -14,6 +14,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.math.BigDecimal;
+import java.util.Optional;
 import java.util.UUID;
 
 @Component
@@ -84,5 +85,26 @@ public class PaymentClient {
     private RefundChargeResponse refundFallback(UUID paymentId, Throwable t) {
         throw new PaymentServiceUnavailableException(
                 "Payment service is unavailable after retries/circuit breaker: " + t.getMessage());
+    }
+
+    @Retry(name = "paymentService")
+    @CircuitBreaker(name = "paymentService", fallbackMethod = "findRefundByPaymentIdFallback")
+    public Optional<RefundChargeResponse> findRefundByPaymentId(UUID paymentId) {
+        try {
+            PaymentServiceEnvelope<RefundChargeResponse> envelope = paymentServiceRestClient.get()
+                    .uri("/api/v1/refunds/by-payment/{paymentId}", paymentId)
+                    .retrieve()
+                    .body(REFUND_RESPONSE_TYPE);
+            return Optional.ofNullable(envelope.getData());
+        } catch (HttpClientErrorException.NotFound e) {
+            return Optional.empty();
+        } catch (RestClientException e) {
+            throw new PaymentServiceUnavailableException(
+                    "Could not reach payment service: " + e.getMessage());
+        }
+    }
+
+    private Optional<RefundChargeResponse> findRefundByPaymentIdFallback(UUID paymentId, Throwable t) {
+        return Optional.empty();
     }
 }

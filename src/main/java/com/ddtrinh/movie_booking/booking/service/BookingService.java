@@ -6,13 +6,11 @@ import com.ddtrinh.movie_booking.booking.entiy.Booking;
 import com.ddtrinh.movie_booking.booking.entiy.BookingSeat;
 import com.ddtrinh.movie_booking.booking.entiy.BookingStatus;
 import com.ddtrinh.movie_booking.booking.event.BookingCancelledEvent;
-import com.ddtrinh.movie_booking.booking.event.BookingConfirmedEvent;
 import com.ddtrinh.movie_booking.booking.repository.BookingRepository;
 import com.ddtrinh.movie_booking.booking.repository.BookingSeatRepository;
-import com.ddtrinh.movie_booking.common.exception.ConflictException;
-import com.ddtrinh.movie_booking.common.exception.ForbiddenException;
-import com.ddtrinh.movie_booking.common.exception.PaymentDeclinedException;
-import com.ddtrinh.movie_booking.common.exception.ResourceNotFoundException;
+import com.ddtrinh.movie_booking.common.exception.*;
+import com.ddtrinh.movie_booking.compensation.CompensationLogger;
+import com.ddtrinh.movie_booking.compensation.entity.CompensationType;
 import com.ddtrinh.movie_booking.payment.client.PaymentClient;
 import com.ddtrinh.movie_booking.payment.dto.PaymentChargeResponse;
 import com.ddtrinh.movie_booking.payment.dto.PaymentStatus;
@@ -34,6 +32,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -49,7 +48,9 @@ public class BookingService {
     private final UserRepository userRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final BookingExpiryWriter bookingExpiryWriter;
+    private final BookingConfirmWriter bookingStatusWriter;
     private final PaymentClient paymentClient;
+    private final CompensationLogger compensationLogger;
 
     @Transactional
     public BookingResponse create(UUID userId, BookingRequest request) {
@@ -132,21 +133,12 @@ public class BookingService {
         }
 
         try {
-            booking.setStatus(BookingStatus.CONFIRMED);
-            booking.setPaymentId(payment.getPaymentId());
-            bookingRepository.saveAndFlush(booking);
-        } catch (ObjectOptimisticLockingFailureException e) {
-            throw new ConflictException("This booking was just modified elsewhere, please refresh and try again");
+            return bookingStatusWriter.writeConfirmed(booking.getId(), payment.getPaymentId());
+        } catch (RuntimeException e) {
+            compensateFailedConfirm(booking.getId(), payment.getPaymentId());
+            throw new ConflictException(
+                    "Could not confirm this booking, any charge has been refunded: " + e.getMessage());
         }
-
-        eventPublisher.publishEvent(new BookingConfirmedEvent(
-                booking.getId(),
-                booking.getUser().getEmail(),
-                booking.getShowtime().getMovie().getTitle(),
-                booking.getShowtime().getStartTime(),
-                booking.getTotalAmount()));
-
-        return buildResponse(booking);
     }
 
     @Transactional
@@ -170,7 +162,7 @@ public class BookingService {
             throw new ConflictException("This booking was just modified elsewhere, please refresh and try again");
         }
 
-        RefundChargeResponse refund = paymentClient.refund(booking.getPaymentId());
+        RefundChargeResponse refund = refundWithReconciliation(booking.getId(), booking.getPaymentId());
 
         List<BookingSeat> bookingSeats = bookingSeatRepository.findAllByBookingId(booking.getId());
         for (BookingSeat bookingSeat : bookingSeats) {
@@ -204,6 +196,31 @@ public class BookingService {
             }
         }
         return expiredCount;
+    }
+
+    private void compensateFailedConfirm(UUID bookingId, UUID paymentId) {
+        try {
+            paymentClient.refund(paymentId);
+        } catch (RuntimeException compensationFailure) {
+            compensationLogger.log(bookingId, paymentId, CompensationType.CHARGE_COMPENSATION_FAILED,
+                    "Charge succeeded but the confirm() write failed, and the compensating refund also failed: "
+                            + compensationFailure.getMessage());
+        }
+    }
+
+    private RefundChargeResponse refundWithReconciliation(UUID bookingId, UUID paymentId) {
+        try {
+            return paymentClient.refund(paymentId);
+        } catch (PaymentServiceUnavailableException e) {
+            Optional<RefundChargeResponse> reconciled = paymentClient.findRefundByPaymentId(paymentId);
+            if (reconciled.isPresent()) {
+                return reconciled.get();
+            }
+            compensationLogger.log(bookingId, paymentId, CompensationType.REFUND_RECONCILIATION_INCONCLUSIVE,
+                    "refund() failed with an ambiguous error, and reconciliation could not confirm either way: "
+                            + e.getMessage());
+            throw e;
+        }
     }
 
     private User findUserOrThrow(UUID userId) {

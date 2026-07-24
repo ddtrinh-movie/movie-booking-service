@@ -46,6 +46,17 @@ resilience4j:
         wait-duration: 200ms
         retry-exceptions:
           - com.ddtrinh.movie_booking.common.exception.PaymentServiceUnavailableException
+        ignore-exceptions:
+          - com.ddtrinh.movie_booking.common.exception.ConflictException
+          - com.ddtrinh.movie_booking.common.exception.ResourceNotFoundException
+
+      bookingConfirmWrite:
+        max-attempts: 3
+        wait-duration: 100ms
+        ignore-exceptions:
+          - org.springframework.orm.ObjectOptimisticLockingFailureException
+          - com.ddtrinh.movie_booking.common.exception.ConflictException
+          - com.ddtrinh.movie_booking.common.exception.ResourceNotFoundException
 
   circuitbreaker:
     instances:
@@ -57,6 +68,9 @@ resilience4j:
         permitted-number-of-calls-in-half-open-state: 3
         record-exceptions:
           - com.ddtrinh.movie_booking.common.exception.PaymentServiceUnavailableException
+        ignore-exceptions:
+          - com.ddtrinh.movie_booking.common.exception.ConflictException
+          - com.ddtrinh.movie_booking.common.exception.ResourceNotFoundException
 
 springdoc:
   swagger-ui:

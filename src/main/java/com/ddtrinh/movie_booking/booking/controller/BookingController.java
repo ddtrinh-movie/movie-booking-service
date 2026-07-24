@@ -37,4 +37,10 @@ public class BookingController {
                                                                 @PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.success(bookingService.confirm(userId, id)));
     }
+
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<ApiResponse<BookingResponse>> cancel(@AuthenticationPrincipal UUID userId,
+                                                               @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.success(bookingService.cancel(userId, id)));
+    }
 }
