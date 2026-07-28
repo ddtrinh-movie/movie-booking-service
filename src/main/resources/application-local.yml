@@ -37,6 +37,7 @@ payment:
     base-url: http://localhost:8081
     connect-timeout-ms: 2000
     read-timeout-ms: 5000
+    api-key: "2f2da27d85282ae9b2e3f12035fbbddfe32b6dafadb12eb19c455a1e21b2aa4e"
 
 resilience4j:
   retry:
