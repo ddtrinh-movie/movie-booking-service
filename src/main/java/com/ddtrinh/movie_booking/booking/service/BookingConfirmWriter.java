@@ -9,9 +9,10 @@ import com.ddtrinh.movie_booking.booking.repository.BookingRepository;
 import com.ddtrinh.movie_booking.booking.repository.BookingSeatRepository;
 import com.ddtrinh.movie_booking.common.exception.ConflictException;
 import com.ddtrinh.movie_booking.common.exception.ResourceNotFoundException;
+import com.ddtrinh.movie_booking.config.RabbitMQConfig;
+import com.ddtrinh.movie_booking.outbox.OutboxWriter;
 import io.github.resilience4j.retry.annotation.Retry;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,7 +26,7 @@ public class BookingConfirmWriter {
 
     private final BookingRepository bookingRepository;
     private final BookingSeatRepository bookingSeatRepository;
-    private final ApplicationEventPublisher eventPublisher;
+    private final OutboxWriter outboxWriter;
 
     @Retry(name = "bookingStatusWrite")
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -40,13 +41,18 @@ public class BookingConfirmWriter {
         booking.setPaymentId(paymentId);
         Booking saved = bookingRepository.saveAndFlush(booking);
 
-        eventPublisher.publishEvent(new BookingConfirmedEvent(
-                saved.getId(),
-                saved.getUser().getEmail(),
-                saved.getShowtime().getMovie().getTitle(),
-                saved.getShowtime().getStartTime(),
-                saved.getTotalAmount()));
-
+        outboxWriter.write(
+                "Booking",
+                saved.getId().toString(),
+                RabbitMQConfig.BOOKING_EVENTS_EXCHANGE,
+                RabbitMQConfig.BOOKING_CONFIRMED_ROUTING_KEY,
+                new BookingConfirmedEvent(
+                        saved.getId(),
+                        saved.getUser().getEmail(),
+                        saved.getShowtime().getMovie().getTitle(),
+                        saved.getShowtime().getStartTime(),
+                        saved.getTotalAmount())
+                );
         List<BookingSeat> bookingSeats = bookingSeatRepository.findAllByBookingId(saved.getId());
         return new BookingResponse(saved, bookingSeats);
     }

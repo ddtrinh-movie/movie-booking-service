@@ -5,7 +5,6 @@ import com.ddtrinh.movie_booking.booking.dto.BookingResponse;
 import com.ddtrinh.movie_booking.booking.entiy.Booking;
 import com.ddtrinh.movie_booking.booking.entiy.BookingSeat;
 import com.ddtrinh.movie_booking.booking.entiy.BookingStatus;
-import com.ddtrinh.movie_booking.booking.event.BookingCancelledEvent;
 import com.ddtrinh.movie_booking.booking.repository.BookingRepository;
 import com.ddtrinh.movie_booking.booking.repository.BookingSeatRepository;
 import com.ddtrinh.movie_booking.common.exception.*;
@@ -23,7 +22,6 @@ import com.ddtrinh.movie_booking.showtime.repository.ShowtimeSeatRepository;
 import com.ddtrinh.movie_booking.user.entiy.User;
 import com.ddtrinh.movie_booking.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,11 +44,14 @@ public class BookingService {
     private final ShowtimeRepository showtimeRepository;
     private final ShowtimeSeatRepository showtimeSeatRepository;
     private final UserRepository userRepository;
-    private final ApplicationEventPublisher eventPublisher;
+
     private final BookingExpiryWriter bookingExpiryWriter;
-    private final BookingConfirmWriter bookingStatusWriter;
+    private final BookingConfirmWriter bookingConfirmWriter;
+    private final BookingCancelWriter bookingCancelWriter;
+
     private final PaymentClient paymentClient;
     private final CompensationLogger compensationLogger;
+
 
     @Transactional
     public BookingResponse create(UUID userId, BookingRequest request) {
@@ -108,7 +109,6 @@ public class BookingService {
         return new BookingResponse(booking, bookingSeats);
     }
 
-    @Transactional
     public BookingResponse confirm(UUID userId, UUID bookingId) {
         Booking booking = bookingRepository.findById(bookingId)
                 .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + bookingId));
@@ -133,7 +133,7 @@ public class BookingService {
         }
 
         try {
-            return bookingStatusWriter.writeConfirmed(booking.getId(), payment.getPaymentId());
+            return bookingConfirmWriter.writeConfirmed(booking.getId(), payment.getPaymentId());
         } catch (RuntimeException e) {
             compensateFailedConfirm(booking.getId(), payment.getPaymentId());
             throw new ConflictException(
@@ -141,7 +141,6 @@ public class BookingService {
         }
     }
 
-    @Transactional
     public BookingResponse cancel(UUID userId, UUID bookingId) {
         Booking booking = bookingRepository.findById(bookingId)
                 .orElseThrow(() -> new ResourceNotFoundException("Booking not found with id: " + bookingId));
@@ -155,30 +154,18 @@ public class BookingService {
                     "Only a confirmed booking can be cancelled, current status: " + booking.getStatus());
         }
 
-        try {
-            booking.setStatus(BookingStatus.CANCELLED);
-            bookingRepository.saveAndFlush(booking);
-        } catch (ObjectOptimisticLockingFailureException e) {
-            throw new ConflictException("This booking was just modified elsewhere, please refresh and try again");
-        }
-
         RefundChargeResponse refund = refundWithReconciliation(booking.getId(), booking.getPaymentId());
 
-        List<BookingSeat> bookingSeats = bookingSeatRepository.findAllByBookingId(booking.getId());
-        for (BookingSeat bookingSeat : bookingSeats) {
-            ShowtimeSeat showtimeSeat = bookingSeat.getShowtimeSeat();
-            showtimeSeat.setStatus(ShowtimeSeatStatus.AVAILABLE);
-            showtimeSeatRepository.save(showtimeSeat);
+        try {
+            return bookingCancelWriter.writeCancelled(bookingId, refund.getAmount());
+        } catch (RuntimeException e) {
+            compensationLogger.log(booking.getId(), booking.getPaymentId(),
+                    CompensationType.REFUND_SUCCEEDED_BUT_CANCEL_WRITE_FAILED,
+                    "Refund succeeded but writeCancelled() failed, booking may still show CONFIRMED: " + e.getMessage());
+            throw new ConflictException(
+                    "Refund succeeded but booking could not be updated, please contact support: " + e.getMessage());
+
         }
-
-        eventPublisher.publishEvent(new BookingCancelledEvent(
-                booking.getId(),
-                booking.getUser().getEmail(),
-                booking.getShowtime().getMovie().getTitle(),
-                refund.getAmount(),
-                Instant.now()));
-
-        return buildResponse(booking);
     }
 
     @Transactional
