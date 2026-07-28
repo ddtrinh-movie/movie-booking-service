@@ -41,6 +41,7 @@ public class OutboxPublisher {
             Message message = MessageBuilder
                     .withBody(event.getPayload().getBytes(StandardCharsets.UTF_8))
                     .setContentType(MessageProperties.CONTENT_TYPE_JSON)
+                    .setMessageId(event.getId().toString())
                     .build();
             rabbitTemplate.send(event.getExchange(), event.getRoutingKey(), message);
             event.setStatus(OutboxStatus.SENT);
